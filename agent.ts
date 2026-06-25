@@ -1,4 +1,4 @@
-import {type SDKUserMessage, query, type CanUseTool, type HookCallback} from '@anthropic-ai/claude-agent-sdk'
+import { query, type CanUseTool, type HookCallback} from '@anthropic-ai/claude-agent-sdk'
 import dotenv from 'dotenv'
 import { permission } from 'process';
 import * as readline from "readline/promises";
@@ -88,10 +88,12 @@ const ghidraGuard: HookCallback = async (input) => {
     }
 }
 
-
 const options = {
         cwd: CWD,
     canUseTool: handleToolRequest,
+
+    includePartialMessages: true,
+
     allowedTools: [
         "Skill",
         "Agent",
@@ -167,56 +169,91 @@ function formatToolMeta(message: any): string {
         .join(' ')
 }
 
-
-async function main(){
+async function main() {
     let transcript = `System: ${SYSTEM_PROMPT}\n`
 
-    
-while(true){
-    const userInput = await rl.question('You: ')
+    console.log("=== Revcon===")
 
-    if(!userInput.trim()) continue
-    if(userInput.trim().toLowerCase() === 'exit') break
+    while (true) {
+        const userInput = await rl.question('You: ')
+        if (!userInput.trim()) continue
+        if (userInput.trim().toLowerCase() === 'exit') break
 
-    const prompt = `${transcript}\nUser: ${userInput}\n Assistant:`
+        const prompt = `${transcript}\nUser: ${userInput}\nAssistant:`
+        let reply = ''
 
-    let reply = ''
+        let inTool = false
+        let currentToolName = ''
+        let currentToolInput = ''
+        
+        for await (const message of query({prompt, options})) {
+            console.log(`[DEBUG] message.type = ${message.type}`)
+            switch (message.type) {
+                case 'stream_event': {
+                    const event = message.event as any
 
+                    if (event.type === 'content_block_start') {
+                        if (event.content_block?.type === 'tool_use') {
+                            currentToolName = event.content_block.name ?? 'tool'
+                            currentToolInput = ''
+                            inTool = true
+                            process.stdout.write(`\n[Using ${currentToolName}...]`)
+                        }
+                    } else if (event.type === 'content_block_delta') {
+                        if (event.delta?.type === 'text_delta' && !inTool) {
+                            const chunk = event.delta.text ?? ''
+                            reply += chunk
+                            process.stdout.write(chunk)
+                        } else if (event.delta?.type === 'input_json_delta') {
+                            currentToolInput += event.delta.partial_json ?? ''
+                        }
+                    } else if (event.type === 'content_block_stop') {
+                        if (inTool) {
+                            console.log(` done]`)
+                            if (currentToolInput) {
+                                try {
+                                    const parsed = JSON.parse(currentToolInput)
+                                    reply += `\n[Tool input: ${JSON.stringify(parsed)}]`
+                                } catch {
+                                    reply += `\n[Tool input: ${currentToolInput}]`
+                                }
+                            }
+                            inTool = false
+                            currentToolName = ''
+                            currentToolInput = ''
+                        }
+                    }
+                    break
+                }
 
-    
-for await (const message of query({
-    prompt, options
-    
-})) {
-    if(message.type === 'assistant'){
-        const toolMeta = formatToolMeta(message.message);
+                case 'assistant': {
+                    const text = extractText(message.message.content)
+                    if (text && !reply.includes(text)) {
+                        reply += text
+                        process.stdout.write(text)
+                    }
+                    break
+                }
 
-        const text = extractText(message.message.content)
-        if(text){
-                    reply +=text;
-        process.stdout.write(text);
+                case 'result': {
+                    const resultText = typeof message.result === 'string'
+                        ? message.result
+                        : JSON.stringify(message.result)
+                    console.log(`\n[Result]: ${resultText.slice(0, 800)}`)
+                    reply += `\n[Result]: ${resultText}`
+                    break
+                }
+            }
         }
+
+        console.log()
+        transcript += `\nUser: ${userInput}\nAssistant: ${reply}`
     }
 
-            if (message.type === 'result') {
-                console.log(`\n[Tool result]: ${JSON.stringify(message.result).slice(0, 1000)}`)
-                reply += `\n[Tool result]: ${message.result}`
-            }
-
-
-}
-  console.log()
-transcript += `\nUser: ${userInput}\nAssistant: ${reply}`
-
-
-}
-rl.close()
-
-
+    rl.close()
 }
 
-
-main().catch((err)=>{
-    console.log(err)
+main().catch((err) => {
+    console.error(err)
     process.exit(1)
 })
