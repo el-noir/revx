@@ -1,6 +1,6 @@
-import {query, type CanUseTool} from '@anthropic-ai/claude-agent-sdk'
+import {type SDKUserMessage, query, type CanUseTool} from '@anthropic-ai/claude-agent-sdk'
 import dotenv from 'dotenv'
-import * as readline from "readline";
+import * as readline from "readline/promises";
 
 const SYSTEM_PROMPT= "You are a reverse engineering agent and you have access to ghidra mcp."
 
@@ -10,8 +10,23 @@ const CWD = process.env.AGENT_CWD
 
 dotenv.config()
 
-async function handleToolRequest(toolName, input, _options){
-    console.log(`\nTool: ${toolName}`);
+// const history: SDKUserMessage[] = []
+
+// function userMessage(text: string): SDKUserMessage{
+//     return {
+//         type: 'user',
+//         message: {role: 'user', content: text},
+//         parent_tool_use_id: null,
+//     }
+// }
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+})
+
+const handleToolRequest: CanUseTool = async (toolName, input, _options) => {
+    console.log(`\n[Tool Req]: ${toolName}`);
 
     if(toolName === "Bash"){
         console.log(`Command: ${(input as any).command}`);
@@ -21,61 +36,137 @@ async function handleToolRequest(toolName, input, _options){
     console.log(`Input: ${JSON.stringify(input, null, 2)}`);
 }
 
-    const response = await prompt("Allow this actions? (y/n)");
+    const response = await rl.question("Allow this actions? (y/n)");
 
     if (response?.trim().toLowerCase() === "y") {
         return {behavior: "allow", updatedInput: input}
     } else{
         return {behavior: "deny", message: "User denied this action"};
     }
+   
 }
 
-function prompt(question: string): Promise<string> {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-    return new Promise((resolve)=>
-        rl.question(question, (answer)=>{
-            rl.close();
-            resolve(answer);
-        })
-    )
-}
-
-for await (const message of query({
-    prompt: `Check if ghidra mcp is working, and check if util file exist or not, through bash`,
-    options: {
-        cwd: CWD,
-
-        // Wire the terminal permission handler
-        canUseTool: handleToolRequest,
-
-        allowedTools: [
-            "Agent",
-            "Read",
-            "Glob",
-            "Grep",
-            "AskUserQuestion",
-            "mcp__ghidra__list_functions",
-            "mcp__ghidra__list_imports",
-            "mcp__ghidra__list_exports",
-            "mcp__ghidra__list_strings",
-            "mcp__ghidra__decompile_function",
-            "mcp__ghidra__decompile_function_by_address",
-            "mcp__ghidra__disassemble_function",
-            "mcp__ghidra__get_xrefs_to",
-            "mcp__ghidra__get_xrefs_from",
-            "mcp__ghidra__rename_function",
-            "mcp__ghidra__rename_variable",
-            "mcp__ghidra__set_comment",
-            "mcp__ghidra__import_binary",
-            "mcp__ghidra__*",
-        ],
-
-        mcpServers: { ghidra: { ... } },
-        model: "kimi-k2.6",
+function extractText(content: any): string {
+    if (typeof content === 'string') return content
+    if (Array.isArray(content)) {
+        return content
+            .map((c: any) => c.text ?? '')
+            .join('')
     }
-})) {
-    console.log(message);
+    return ''
 }
+
+let transcript = '';
+
+const options = {
+        cwd: CWD,
+    canUseTool: handleToolRequest,
+    allowedTools: [
+        "Agent",
+        "Read",
+        "Glob",
+        "Grep",
+        "AskUserQuestion",
+        "mcp__ghidra__list_functions",
+        "mcp__ghidra__list_imports",
+        "mcp__ghidra__list_exports",
+        "mcp__ghidra__list_strings",
+        "mcp__ghidra__decompile_function",
+        "mcp__ghidra__decompile_function_by_address",
+        "mcp__ghidra__disassemble_function",
+        "mcp__ghidra__get_xrefs_to",
+        "mcp__ghidra__get_xrefs_from",
+        "mcp__ghidra__rename_function",
+        "mcp__ghidra__rename_variable",
+        "mcp__ghidra__set_comment",
+        "mcp__ghidra__import_binary",
+        "mcp__ghidra__*",
+    ],
+    mcpServers: {
+        ghidra: {
+            command: "uv",
+            args: [
+                "run",
+                GHIDRA_MCP_PATH,
+                "--ghidra-server",
+                GHIDRA_SERVER_URL,
+                "--transport",
+                "stdio",
+            ]
+        }
+    },
+    model: "kimi-k2.6",
+    continue: true,  
+}
+
+function extractToolResults(message: any): string {
+    if(message.type === 'result'){
+        return message.result ?? ''
+    }
+    if(message.type === 'user' && message.tool_use_result)
+    {
+        return JSON.stringify(message.tool_use_result).slice(0, 2000)
+    }
+    return ''
+}
+
+function formatToolMeta(message: any): string {
+    if (!message.tool_use_meta?.length) return ''
+    return message.tool_use_meta
+        .map((m: any) => `[Calling tool: ${m.display_name ?? m.id}]`)
+        .join(' ')
+}
+
+
+async function main(){
+    let transcript = `System: ${SYSTEM_PROMPT}\n`
+
+    
+while(true){
+    const userInput = await rl.question('You: ')
+
+    if(!userInput.trim()) continue
+    if(userInput.trim().toLowerCase() === 'exit') break
+
+    const prompt = `${transcript}\nUser: ${userInput}\n Assistant:`
+
+    let reply = ''
+
+
+    
+for await (const message of query({
+    prompt, options
+    
+})) {
+    if(message.type === 'assistant'){
+        const toolMeta = formatToolMeta(message.message);
+
+        const text = extractText(message.message.content)
+        if(text){
+                    reply +=text;
+        process.stdout.write(text);
+        }
+    }
+
+            if (message.type === 'result') {
+                console.log(`\n[Tool result]: ${JSON.stringify(message.result).slice(0, 1000)}`)
+                reply += `\n[Tool result]: ${message.result}`
+            }
+
+
+}
+  console.log()
+transcript += `\nUser: ${userInput}\nAssistant: ${reply}`
+
+
+}
+rl.close()
+
+
+}
+
+
+main().catch((err)=>{
+    console.log(err)
+    process.exit(1)
+})
