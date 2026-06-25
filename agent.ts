@@ -3,6 +3,11 @@ import dotenv from 'dotenv'
 import { permission } from 'process';
 import * as readline from "readline/promises";
 
+import { STATIC_ANALYSIS } from "./subagent/static-analysis-agent.js";
+import { DYNAMIC_ANALYSIS } from "./subagent/dynamic-analysis-agent.js";
+import { OSINT_ANALYSIS } from "./subagent/osint-analysis-agent.js";
+import { EXPLOIT_DEV } from "./subagent/exploit-dev-agent.js";
+
 const SYSTEM_PROMPT= "You are a reverse engineering agent and you have access to ghidra mcp."
 
 const GHIDRA_MCP_PATH = process.env.GHIDRA_MCP_PATH ?? "/home/el-noir/Downloads/GhidraMCP-release-1-4/bridge_mcp_ghidra.py";
@@ -123,10 +128,17 @@ const options = {
       "advanced-decoder",
     ],
 
+    agents: {
+        static_analysis: STATIC_ANALYSIS,
+        dynamic_analysis: DYNAMIC_ANALYSIS,
+        osint_analysis: OSINT_ANALYSIS,
+        exploit_dev: EXPLOIT_DEV,
+    },
+
     hooks: {
         PreToolUse:[
             {
-                matcher: "mcp_ghidra__*",
+                matcher: "mcp__ghidra__*",
                 hooks:[
                     ghidraGuard
                 ]
