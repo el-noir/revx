@@ -1,5 +1,6 @@
-import {type SDKUserMessage, query, type CanUseTool} from '@anthropic-ai/claude-agent-sdk'
+import {type SDKUserMessage, query, type CanUseTool, type HookCallback} from '@anthropic-ai/claude-agent-sdk'
 import dotenv from 'dotenv'
+import { permission } from 'process';
 import * as readline from "readline/promises";
 
 const SYSTEM_PROMPT= "You are a reverse engineering agent and you have access to ghidra mcp."
@@ -56,32 +57,81 @@ function extractText(content: any): string {
     return ''
 }
 
-let transcript = '';
+const ghidraGuard: HookCallback = async (input) => {
+    if (input.hook_event_name !== 'PreToolUse') return {}
+
+    const tool = input.tool_name
+    console.log("[GhidraGuard] checking:", tool)
+
+    const readonly = [
+        "mcp__ghidra__list_functions",
+        "mcp__ghidra__list_imports",
+        "mcp__ghidra__list_exports",
+        "mcp__ghidra__list_strings",
+        "mcp__ghidra__list_segments",
+        "mcp__ghidra__decompile_function",
+        "mcp__ghidra__disassemble_function",
+        "mcp__ghidra__get_xrefs_to",
+        "mcp__ghidra__get_xrefs_from",
+    ]
+
+    const decision: 'allow' | 'deny' = readonly.includes(tool) ? 'allow' : 'deny'
+
+    return {
+        hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: decision,
+            permissionDecisionReason: decision === 'allow'
+                ? 'Read-only Ghidra tool'
+                : 'Ghidra modifications are disabled',
+        },
+    }
+}
+
 
 const options = {
         cwd: CWD,
     canUseTool: handleToolRequest,
     allowedTools: [
+        "Skill",
         "Agent",
         "Read",
         "Glob",
         "Grep",
         "AskUserQuestion",
-        "mcp__ghidra__list_functions",
-        "mcp__ghidra__list_imports",
-        "mcp__ghidra__list_exports",
-        "mcp__ghidra__list_strings",
-        "mcp__ghidra__decompile_function",
-        "mcp__ghidra__decompile_function_by_address",
-        "mcp__ghidra__disassemble_function",
-        "mcp__ghidra__get_xrefs_to",
-        "mcp__ghidra__get_xrefs_from",
-        "mcp__ghidra__rename_function",
-        "mcp__ghidra__rename_variable",
-        "mcp__ghidra__set_comment",
-        "mcp__ghidra__import_binary",
-        "mcp__ghidra__*",
+        "mcp__ghidra__*"
     ],
+
+    disallowedTools:[
+  "mcp__ghidra__rename_function",
+  "mcp__ghidra__rename_variable",
+  "mcp__ghidra__set_comment",
+  "mcp__ghidra__import_binary"
+],
+
+    skills: [
+      "general-conversation",
+      "ctf-triage",
+      "ctf-solving",
+      "reverse-triage",
+      "deep-decompilation",
+      "reporting",
+      "ghidra-launch",
+      "ghidra-triage",
+      "advanced-decoder",
+    ],
+
+    hooks: {
+        PreToolUse:[
+            {
+                matcher: "mcp_ghidra__*",
+                hooks:[
+                    ghidraGuard
+                ]
+            }
+        ]
+    },
+
     mcpServers: {
         ghidra: {
             command: "uv",
