@@ -10,6 +10,7 @@ import { EXPLOIT_DEV } from "./subagent/exploit-dev-agent.js";
 
 import pg from 'pg'
 import {PostgresSessionStore} from './session/index.js'
+import { time } from 'console';
 
 const {Pool} = pg;
 
@@ -87,25 +88,173 @@ process.on('SIGINT', async () => {
     process.exit(0)
 })
 
+type PolicyAction = "allow" | "ask" | "deny" | "sandbox"
+
+const TOOL_POLICY: Record<string, PolicyAction> = {
+       Read: "allow",
+    Glob: "allow",
+   Grep: "allow",
+    Agent: "allow",
+   Skill: "allow",
+   AskUserQuestion: "allow",
+
+
+   "mcp_analysis_sandbox_exec": "sandbox",
+
+     Bash: "ask",
+
+      "mcp__ghidra__list_functions": "allow",
+    "mcp__ghidra__list_imports": "allow",
+    "mcp__ghidra__list_exports": "allow",
+    "mcp__ghidra__list_strings": "allow",
+    "mcp__ghidra__list_segments": "allow",
+    "mcp__ghidra__decompile_function": "allow",
+    "mcp__ghidra__disassemble_function": "allow",
+    "mcp__ghidra__get_xrefs_to": "allow",
+    "mcp__ghidra__get_xrefs_from": "allow",
+
+    "mcp__ghidra__rename_function": "ask",
+    "mcp__ghidra__rename_variable": "ask",
+    "mcp__ghidra__set_comment": "ask",
+}
+
+const RISK: Record<string, number> = {
+    Read: 0,
+    Glob: 0,
+    Grep: 0,
+    Agent: 0,
+    Skill: 1,
+
+    "mcp_analysis_sandbox_exec": 4,
+
+    Bash: 7,
+
+        "mcp__ghidra__list_strings": 0,
+    "mcp__ghidra__decompile_function": 1,
+    "mcp__ghidra__rename_function": 3,
+    "mcp__ghidra__import_binary": 9,
+}
+
+const DANGEROUS_PATTERNS = [
+    "rm -rf",
+    "shutdown",
+    "mkfs",
+    ":(){",
+    "dd if=",
+    "> /dev/",
+    "chmod -R 777 /",
+    "curl .*\\| sh",
+];
+
+function isDangerousCommand(command: string): boolean {
+    return DANGEROUS_PATTERNS.some((pattern)=>
+    new RegExp(pattern, "i").test(command))
+}
+
+
+
+
 const handleToolRequest: CanUseTool = async (toolName, input, _options) => {
     console.log(`\n[Tool Req]: ${toolName}`);
 
-    if(toolName === "Bash"){
-        console.log(`Command: ${(input as any).command}`);
-        if((input as any).description) console.log(`Description: ${(input as any).description}`)
-    } else 
-{
-    console.log(`Input: ${JSON.stringify(input, null, 2)}`);
+    if (toolName === "Bash") {
+        const cmd = ((input as any).command ?? "") as string;
+        const preview = cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
+        console.log(`Command: ${preview}`);
+        if ((input as any).description) {
+            console.log(`Description: ${(input as any).description}`);
+        }
+    } 
+    else {
+        const jsonInput = JSON.stringify(input, null, 2);
+        const firstLine = jsonInput.split("\n")[0];
+        console.log(`Input: ${firstLine}`);
+    }
+
+    if (toolName === "mcp__analysis_sandbox__exec") {
+        return { behavior: "allow", updatedInput: input };
+    }
+
+        if (toolName === "Bash") {
+        return { behavior: "allow", updatedInput: input };
+    }
+
+        if (
+        toolName.startsWith("mcp__ghidra__") &&
+        !["rename_", "set_", "add_", "create_", "delete_", "import_"].some((op) =>
+            toolName.includes(op)
+        )
+    ) {
+        return { behavior: "allow", updatedInput: input };
+    }
+
+    if (
+        ["Read", "Glob", "Grep", "Agent", "Skill"].includes(toolName) ||
+        toolName.startsWith("mcp__tavily_remote_mcp__")
+    ) {
+        return { behavior: "allow", updatedInput: input };
+        
+        if(isDangerousCommand(cmd)){
+            return{
+                behavior: 'deny',
+                message: "Dangerous Bash command blocked by policy",
+            };
+        }
+
+    } else {
+        const jsonInput = JSON.stringify(input, null, 2);
+        const firstLine = jsonInput.split("\n")[0];
+        console.log(`Input: ${firstLine}`)
+    }
+
+    
+
+    const policy = TOOL_POLICY[toolName] ?? "ask";
+    const risk = RISK[toolName] ?? 5;
+
+    if(policy === "deny" || risk >= 7){
+        return {behavior: "deny", message: "Blocked by policy"};
+    }
+
+    if(policy === "sandbox"){
+        return {
+            behavior: "allow",
+            updatedInput: {
+                ...input,
+                timeout: 300,
+                network: false,
+            }
+        }
+    }
+
+    const ok = await askApproval(`Allow ${toolName}`);
+
+    if(ok){
+        return {behavior: "allow", updatedInput: input};
+    }
+    return {behavior: "deny", message: "User denied this action"};
+
+    
 }
 
-    const response = await rl.question("Allow this actions? (y/n)");
+async function askApproval(question: string): Promise<boolean> {
+    const answer = await rl.question(`${question} (y/n) `)
+    return answer.trim().toLowerCase().startsWith('y')
+}
 
-    if (response?.trim().toLowerCase() === "y") {
-        return {behavior: "allow", updatedInput: input}
-    } else{
-        return {behavior: "deny", message: "User denied this action"};
+function formatToolResponse(toolResult: any): string {
+    const isError = toolResult?.is_error || toolResult?.error
+    const prefix = isError ? '[TOOL ERROR]' : '[TOOL OK]'
+    let text: string
+    if (typeof toolResult?.content === 'string') {
+        text = toolResult.content
+    } else if (toolResult?.content != null) {
+        text = JSON.stringify(toolResult.content)
+    } else {
+        text = JSON.stringify(toolResult)
     }
-   
+    const preview = text.split('\n').slice(0, 3).join(' ').slice(0, 200)
+    return `${prefix} ${preview}${text.length > 200 ? '...' : ''}`
 }
 
 function extractText(content: any): string {
@@ -122,37 +271,66 @@ const ghidraGuard: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {}
 
     const tool = input.tool_name
-    console.log("[GhidraGuard] checking:", tool)
+    console.log(`[Ghidra] ${tool}`)
 
-    const readonly = [
-        "mcp__ghidra__list_functions",
-        "mcp__ghidra__list_imports",
-        "mcp__ghidra__list_exports",
-        "mcp__ghidra__list_strings",
-        "mcp__ghidra__list_segments",
-        "mcp__ghidra__decompile_function",
-        "mcp__ghidra__disassemble_function",
-        "mcp__ghidra__get_xrefs_to",
-        "mcp__ghidra__get_xrefs_from",
-    ]
-
-    const decision: 'allow' | 'deny' = readonly.includes(tool) ? 'allow' : 'deny'
-
-    return {
-        hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: decision,
-            permissionDecisionReason: decision === 'allow'
-                ? 'Read-only Ghidra tool'
-                : 'Ghidra modifications are disabled',
-        },
+    if (
+        tool.includes("import") ||
+        tool.includes("delete") ||
+        tool.includes("create_project")
+    ) {
+        return {
+            hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: "Destructive Ghidra operation blocked",
+            },
+        };
     }
-}
+    return {};
+  }
+
+
+  const ghidraResultCollector: HookCallback = async (input) =>{
+    if(input.hook_event_name !=="PostToolUse") return {};
+
+    if (input.tool_name !== "mcp__ghidra__decompile_function") return {};
+
+    const response = input.tool_response as any;
+
+    const functionName = (input.tool_input as any)?.function ??
+    (input.tool_input as any)?.name ??
+    "unknown";
+
+    const output = typeof response?.content === "string"
+            ? response.content
+            : JSON.stringify(response?.content ?? response);
+
+    console.log(
+       `[FINDING] ${functionName}: ${output.slice(0, 120)}${output.length > 120 ? "..." : ""}`
+    )
+
+    return {}
+  }
+
 
 const options = {
         cwd: CWD,
     canUseTool: handleToolRequest,
     sessionStore,
+
+        CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+
+    CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
+
+    OTEL_TRACES_EXPORTER: "otlp",
+    OTEL_METRICS_EXPORTER: "otlp",
+    OTEL_LOGS_EXPORTER: "otlp",
+
+    OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
+    OTEL_EXPORTER_OTLP_ENDPOINT:
+      "http://localhost:4318",
+
+    OTEL_SERVICE_NAME: "revcon-agent",
 
     includePartialMessages: true,
     allowedTools: [
@@ -197,6 +375,14 @@ const options = {
                 matcher: "mcp__ghidra__*",
                 hooks:[
                     ghidraGuard
+                ]
+            }
+        ],
+        PostToolUse: [
+            {
+                matcher: "mcp_ghidra_decompile_function",
+                hooks: [
+                    ghidraResultCollector
                 ]
             }
         ]
@@ -254,100 +440,57 @@ async function main() {
         const prompt = `${transcript}\nUser: ${userInput}\nAssistant:`
         let reply = ''
 
-        let inTool = false
-        let currentToolName = ''
-        let currentToolInput = ''
-        
-   for await (const message of query({prompt, options})) {
-    switch (message.type) {
-        case 'system': {
-            if (message.subtype === 'init') {
-                console.log(`[SESSION] ${message.session_id}`)
-            } else if (message.subtype === 'status') {
-                console.log(`[STATUS] ${message.data != null ? JSON.stringify(message.data).slice(0, 200) : '(no data)'}`)
-            }
-            break
-        }
-
-        case 'stream_event': {
-            const event = message.event as any
-            if (!event) break
-
-            if (event.type === 'content_block_start') {
-                if (event.content_block?.type === 'tool_use') {
-                    currentToolName = event.content_block.name ?? 'tool'
-                    currentToolInput = ''
-                    inTool = true
-                    process.stdout.write(`\n[TOOL START] ${currentToolName}\n`)
+        for await (const message of query({prompt, options})) {
+            switch (message.type) {
+                case 'system': {
+                    if (message.subtype === 'init') {
+                        console.log(`[SESSION] ${message.session_id}`)
+                    } 
+                    break
                 }
-            } else if (event.type === 'content_block_delta') {
-                if (event.delta?.type === 'text_delta' && !inTool) {
-                    const chunk = event.delta.text ?? ''
-                    reply += chunk
-                    process.stdout.write(chunk)
-                } else if (event.delta?.type === 'input_json_delta') {
-                    currentToolInput += event.delta.partial_json ?? ''
+
+                case 'assistant': {
+                    const text = extractText(message.message.content)
+                    if (text && !reply.includes(text)) {
+                        reply += text
+                        process.stdout.write(text)
+                    }
+                    break
                 }
-            } else if (event.type === 'content_block_stop') {
-                if (inTool) {
-                    console.log(`[TOOL INPUT] ${currentToolName}`)
-                    console.log(JSON.stringify(currentToolInput, null, 2))
-                    inTool = false
-                    currentToolName = ''
-                    currentToolInput = ''
+
+                case 'user': {
+                    const toolResult = (message as any).tool_use_result
+                    if (toolResult) {
+                        console.log(formatToolResponse(toolResult))
+                    }
+                    break
+                }
+
+                case 'result': {
+                    console.log(`\n[DONE] ${message.subtype}`)
+                    break
+                }
+
+                case 'permission_denied': {
+                    console.log(`[DENIED] ${message.tool_name}`)
+                    break
+                }
+
+                case 'mirror_error': {
+                    console.log(`[MIRROR ERROR] ${JSON.stringify(message.data).slice(0, 300)}`)
+                    break
+                }
+
+                case 'notification': {
+                    console.log(`[NOTE] ${JSON.stringify(message.data).slice(0, 300)}`)
+                    break
+                }
+
+                default: {
+                    console.log(`[${message.type}]`)
                 }
             }
-            break
         }
-
-        case 'assistant': {
-            const text = extractText(message.message.content)
-            if (text && !reply.includes(text)) {
-                reply += text
-                process.stdout.write(text)
-            }
-            break
-        }
-
-        case 'user': {
-            const toolResult = (message as any).tool_use_result
-            if (toolResult) {
-                console.log(`[TOOL RESULT]`)
-                console.log(JSON.stringify(toolResult, null, 2).slice(0, 30))
-            }
-            break
-        }
-
-        case 'result': {
-            const resultText = typeof message.result === 'string'
-                ? message.result
-                : JSON.stringify(message.result)
-            console.log(`\n[DONE] ${message.subtype}`)
-
-            break
-        }
-
-        case 'permission_denied': {
-            console.log(`[DENIED] ${message.tool_name}`)
-            break
-        }
-
-        case 'mirror_error': {
-            console.log(`[MIRROR ERROR] ${JSON.stringify(message.data).slice(0, 300)}`)
-            break
-        }
-
-        case 'notification': {
-            console.log(`[NOTE] ${JSON.stringify(message.data).slice(0, 300)}`)
-            break
-        }
-
-        default: {
-            console.log(`[${message.type}]`)
-        }
-    }
-}
-        
 
         console.log()
         transcript += `\nUser: ${userInput}\nAssistant: ${reply}`
