@@ -147,6 +147,11 @@ const options = {
     },
 
     mcpServers: {
+        "tavily-remote-mcp": {
+        type: "http",
+        url: `https://mcp.tavily.com/mcp/?tavilyApiKey=${process.env.ANTHROPIC_TAVILY_API_KEY}`,
+        alwaysLoad: true,
+      },
         ghidra: {
             command: "uv",
             args: [
