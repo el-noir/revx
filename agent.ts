@@ -203,65 +203,96 @@ async function main() {
         let currentToolName = ''
         let currentToolInput = ''
         
-        for await (const message of query({prompt, options})) {
-            console.log(`[DEBUG] message.type = ${message.type}`)
-            switch (message.type) {
-                case 'stream_event': {
-                    const event = message.event as any
+   for await (const message of query({prompt, options})) {
+    switch (message.type) {
+        case 'system': {
+            if (message.subtype === 'init') {
+                console.log(`[SESSION] ${message.session_id}`)
+            } else if (message.subtype === 'status') {
+                console.log(`[STATUS] ${message.data != null ? JSON.stringify(message.data).slice(0, 200) : '(no data)'}`)
+            }
+            break
+        }
 
-                    if (event.type === 'content_block_start') {
-                        if (event.content_block?.type === 'tool_use') {
-                            currentToolName = event.content_block.name ?? 'tool'
-                            currentToolInput = ''
-                            inTool = true
-                            process.stdout.write(`\n[Using ${currentToolName}...]`)
-                        }
-                    } else if (event.type === 'content_block_delta') {
-                        if (event.delta?.type === 'text_delta' && !inTool) {
-                            const chunk = event.delta.text ?? ''
-                            reply += chunk
-                            process.stdout.write(chunk)
-                        } else if (event.delta?.type === 'input_json_delta') {
-                            currentToolInput += event.delta.partial_json ?? ''
-                        }
-                    } else if (event.type === 'content_block_stop') {
-                        if (inTool) {
-                            console.log(` done]`)
-                            if (currentToolInput) {
-                                try {
-                                    const parsed = JSON.parse(currentToolInput)
-                                    reply += `\n[Tool input: ${JSON.stringify(parsed)}]`
-                                } catch {
-                                    reply += `\n[Tool input: ${currentToolInput}]`
-                                }
-                            }
-                            inTool = false
-                            currentToolName = ''
-                            currentToolInput = ''
-                        }
-                    }
-                    break
+        case 'stream_event': {
+            const event = message.event as any
+            if (!event) break
+
+            if (event.type === 'content_block_start') {
+                if (event.content_block?.type === 'tool_use') {
+                    currentToolName = event.content_block.name ?? 'tool'
+                    currentToolInput = ''
+                    inTool = true
+                    process.stdout.write(`\n[TOOL START] ${currentToolName}\n`)
                 }
-
-                case 'assistant': {
-                    const text = extractText(message.message.content)
-                    if (text && !reply.includes(text)) {
-                        reply += text
-                        process.stdout.write(text)
-                    }
-                    break
+            } else if (event.type === 'content_block_delta') {
+                if (event.delta?.type === 'text_delta' && !inTool) {
+                    const chunk = event.delta.text ?? ''
+                    reply += chunk
+                    process.stdout.write(chunk)
+                } else if (event.delta?.type === 'input_json_delta') {
+                    currentToolInput += event.delta.partial_json ?? ''
                 }
-
-                case 'result': {
-                    const resultText = typeof message.result === 'string'
-                        ? message.result
-                        : JSON.stringify(message.result)
-                    console.log(`\n[Result]: ${resultText.slice(0, 800)}`)
-                    reply += `\n[Result]: ${resultText}`
-                    break
+            } else if (event.type === 'content_block_stop') {
+                if (inTool) {
+                    console.log(`[TOOL INPUT] ${currentToolName}`)
+                    console.log(JSON.stringify(currentToolInput, null, 2))
+                    inTool = false
+                    currentToolName = ''
+                    currentToolInput = ''
                 }
             }
+            break
         }
+
+        case 'assistant': {
+            const text = extractText(message.message.content)
+            if (text && !reply.includes(text)) {
+                reply += text
+                process.stdout.write(text)
+            }
+            break
+        }
+
+        case 'user': {
+            const toolResult = (message as any).tool_use_result
+            if (toolResult) {
+                console.log(`[TOOL RESULT]`)
+                console.log(JSON.stringify(toolResult, null, 2).slice(0, 30))
+            }
+            break
+        }
+
+        case 'result': {
+            const resultText = typeof message.result === 'string'
+                ? message.result
+                : JSON.stringify(message.result)
+            console.log(`\n[DONE] ${message.subtype}`)
+
+            break
+        }
+
+        case 'permission_denied': {
+            console.log(`[DENIED] ${message.tool_name}`)
+            break
+        }
+
+        case 'mirror_error': {
+            console.log(`[MIRROR ERROR] ${JSON.stringify(message.data).slice(0, 300)}`)
+            break
+        }
+
+        case 'notification': {
+            console.log(`[NOTE] ${JSON.stringify(message.data).slice(0, 300)}`)
+            break
+        }
+
+        default: {
+            console.log(`[${message.type}]`)
+        }
+    }
+}
+        
 
         console.log()
         transcript += `\nUser: ${userInput}\nAssistant: ${reply}`
