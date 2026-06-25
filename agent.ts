@@ -8,13 +8,25 @@ import { DYNAMIC_ANALYSIS } from "./subagent/dynamic-analysis-agent.js";
 import { OSINT_ANALYSIS } from "./subagent/osint-analysis-agent.js";
 import { EXPLOIT_DEV } from "./subagent/exploit-dev-agent.js";
 
+import pg from 'pg'
+import {PostgresSessionStore} from './session/index.js'
+
+const {Pool} = pg;
+
+dotenv.config()
+
 const SYSTEM_PROMPT= "You are a reverse engineering agent and you have access to ghidra mcp."
 
 const GHIDRA_MCP_PATH = process.env.GHIDRA_MCP_PATH ?? "/home/el-noir/Downloads/GhidraMCP-release-1-4/bridge_mcp_ghidra.py";
 const GHIDRA_SERVER_URL = process.env.GHIDRA_SERVER_URL ?? "http://127.0.0.1:8080/";
 const CWD = process.env.AGENT_CWD
 
-dotenv.config()
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+})
+
+const sessionStore = new PostgresSessionStore({pool})
+await sessionStore.ensureSchema()
 
 // const history: SDKUserMessage[] = []
 
@@ -29,6 +41,12 @@ dotenv.config()
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
+})
+
+process.on('SIGINT', async () => {
+    await pool.end()
+    rl.close()
+    process.exit(0)
 })
 
 const handleToolRequest: CanUseTool = async (toolName, input, _options) => {
@@ -96,9 +114,9 @@ const ghidraGuard: HookCallback = async (input) => {
 const options = {
         cwd: CWD,
     canUseTool: handleToolRequest,
+    sessionStore,
 
     includePartialMessages: true,
-
     allowedTools: [
         "Skill",
         "Agent",
@@ -165,7 +183,6 @@ const options = {
         }
     },
     model: "kimi-k2.6",
-    continue: true,  
 }
 
 function extractToolResults(message: any): string {
