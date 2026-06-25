@@ -1,5 +1,6 @@
-import {query} from '@anthropic-ai/claude-agent-sdk'
+import {query, type CanUseTool} from '@anthropic-ai/claude-agent-sdk'
 import dotenv from 'dotenv'
+import * as readline from "readline";
 
 const SYSTEM_PROMPT= "You are a reverse engineering agent and you have access to ghidra mcp."
 
@@ -9,53 +10,72 @@ const CWD = process.env.AGENT_CWD
 
 dotenv.config()
 
-for await(const message of query({
-    prompt: `Check if ghidra mcp is working`,
+async function handleToolRequest(toolName, input, _options){
+    console.log(`\nTool: ${toolName}`);
+
+    if(toolName === "Bash"){
+        console.log(`Command: ${(input as any).command}`);
+        if((input as any).description) console.log(`Description: ${(input as any).description}`)
+    } else 
+{
+    console.log(`Input: ${JSON.stringify(input, null, 2)}`);
+}
+
+    const response = await prompt("Allow this actions? (y/n)");
+
+    if (response?.trim().toLowerCase() === "y") {
+        return {behavior: "allow", updatedInput: input}
+    } else{
+        return {behavior: "deny", message: "User denied this action"};
+    }
+}
+
+function prompt(question: string): Promise<string> {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    return new Promise((resolve)=>
+        rl.question(question, (answer)=>{
+            rl.close();
+            resolve(answer);
+        })
+    )
+}
+
+for await (const message of query({
+    prompt: `Check if ghidra mcp is working, and check if util file exist or not, through bash`,
     options: {
         cwd: CWD,
 
+        // Wire the terminal permission handler
+        canUseTool: handleToolRequest,
 
         allowedTools: [
             "Agent",
             "Read",
             "Glob",
             "Grep",
-            "Bash",
             "AskUserQuestion",
-                "mcp__ghidra__list_functions",
-    "mcp__ghidra__list_imports",
-    "mcp__ghidra__list_exports",
-    "mcp__ghidra__list_strings",
-    "mcp__ghidra__decompile_function",
-    "mcp__ghidra__decompile_function_by_address",
-    "mcp__ghidra__disassemble_function",
-    "mcp__ghidra__get_xrefs_to",
-    "mcp__ghidra__get_xrefs_from",
-    "mcp__ghidra__rename_function",
-    "mcp__ghidra__rename_variable",
-    "mcp__ghidra__set_comment",
-    "mcp__ghidra__import_binary",
-    "mcp_ghidra__*"
+            "mcp__ghidra__list_functions",
+            "mcp__ghidra__list_imports",
+            "mcp__ghidra__list_exports",
+            "mcp__ghidra__list_strings",
+            "mcp__ghidra__decompile_function",
+            "mcp__ghidra__decompile_function_by_address",
+            "mcp__ghidra__disassemble_function",
+            "mcp__ghidra__get_xrefs_to",
+            "mcp__ghidra__get_xrefs_from",
+            "mcp__ghidra__rename_function",
+            "mcp__ghidra__rename_variable",
+            "mcp__ghidra__set_comment",
+            "mcp__ghidra__import_binary",
+            "mcp__ghidra__*",
         ],
 
-        mcpServers: {
-            ghidra: {
-                command: "uv",
-                args: [
-                    "run",
-                    GHIDRA_MCP_PATH,
-                    "--ghidra-server",
-                    GHIDRA_SERVER_URL,
-                    "--transport",
-                    "stdio",
-                ]
-            }
-        },
-
+        mcpServers: { ghidra: { ... } },
         model: "kimi-k2.6",
-
-        // permissionMode: "bypassPermissions"
     }
-})){
+})) {
     console.log(message);
 }
