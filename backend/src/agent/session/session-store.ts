@@ -8,19 +8,27 @@ import type {
 export type PostgresSessionStoreOptions = {
   pool: Pool
   tableName?: string
+
+  fixedProjectKey?: string
 }
 
 export class PostgresSessionStore implements SessionStore {
   private readonly pool: Pool
   private readonly table: string
+  private readonly fixedProjectKey: string | undefined
 
   constructor(opts: PostgresSessionStoreOptions) {
     this.pool = opts.pool
+    this.fixedProjectKey = opts.fixedProjectKey
     const t = opts.tableName ?? 'claude_session_entries'
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(t)) {
       throw new Error(`invalid tableName: ${t}`)
     }
     this.table = t
+  }
+
+  private pk(key: SessionKey | string): string {
+    return this.fixedProjectKey ?? (typeof key === 'string' ? key : key.projectKey)
   }
 
   async ensureSchema(): Promise<void> {
@@ -44,7 +52,7 @@ export class PostgresSessionStore implements SessionStore {
     if (entries.length === 0) return
 
     const params: unknown[] = [
-      key.projectKey,
+      this.pk(key), 
       key.sessionId,
       key.subpath ?? null,
     ]
@@ -63,37 +71,66 @@ export class PostgresSessionStore implements SessionStore {
       `SELECT entry FROM ${this.table}
          WHERE project_key = $1 AND session_id = $2 AND subpath IS NOT DISTINCT FROM $3
          ORDER BY id`,
-      [key.projectKey, key.sessionId, key.subpath ?? null],
+      [this.pk(key), key.sessionId, key.subpath ?? null],
     )
-    return rows.length > 0 ? rows.map(r => r.entry) : null
+    return rows.length > 0 ? rows.map((r: any) => r.entry) : null
   }
 
   async listSessions(
     projectKey: string,
-  ): Promise<Array<{ sessionId: string; mtime: number }>> {
-    const { rows } = await this.pool.query<{ session_id: string; mtime: Date }>(
-      `SELECT session_id, MAX(created_at) AS mtime FROM ${this.table}
+  ): Promise<Array<{ sessionId: string; projectKey: string; mtime: number }>> {
+    const { rows } = await this.pool.query<{ session_id: string; project_key: string; mtime: Date }>(
+      `SELECT session_id, project_key, MAX(created_at) AS mtime FROM ${this.table}
          WHERE project_key = $1 AND subpath IS NULL
-         GROUP BY session_id
+         GROUP BY session_id, project_key
          ORDER BY mtime DESC`,
-      [projectKey],
+      [this.pk(projectKey)],
     )
-    return rows.map(r => ({
+    return rows.map((r: any) => ({
       sessionId: r.session_id,
+      projectKey: r.project_key,
       mtime: r.mtime.getTime(),
     }))
+  }
+
+  async listAllSessions(): Promise<Array<{ sessionId: string; projectKey: string; mtime: number }>> {
+    const { rows } = await this.pool.query<{ session_id: string; project_key: string; mtime: Date }>(
+      `SELECT session_id, project_key, MAX(created_at) AS mtime FROM ${this.table}
+         WHERE subpath IS NULL
+         GROUP BY session_id, project_key
+         ORDER BY mtime DESC`
+    )
+    return rows.map((r: any) => ({
+      sessionId: r.session_id,
+      projectKey: r.project_key,
+      mtime: r.mtime.getTime(),
+    }))
+  }
+
+  async deleteBySessionId(sessionId: string): Promise<void> {
+    if (this.fixedProjectKey) {
+      await this.pool.query(
+        `DELETE FROM ${this.table} WHERE project_key = $1 AND session_id = $2`,
+        [this.fixedProjectKey, sessionId],
+      )
+    } else {
+      await this.pool.query(
+        `DELETE FROM ${this.table} WHERE session_id = $1`,
+        [sessionId],
+      )
+    }
   }
 
   async delete(key: SessionKey): Promise<void> {
     if (key.subpath === undefined) {
       await this.pool.query(
         `DELETE FROM ${this.table} WHERE project_key = $1 AND session_id = $2`,
-        [key.projectKey, key.sessionId],
+        [this.pk(key), key.sessionId],
       )
     } else {
       await this.pool.query(
         `DELETE FROM ${this.table} WHERE project_key = $1 AND session_id = $2 AND subpath = $3`,
-        [key.projectKey, key.sessionId, key.subpath],
+        [this.pk(key), key.sessionId, key.subpath],
       )
     }
   }
@@ -105,8 +142,8 @@ export class PostgresSessionStore implements SessionStore {
     const { rows } = await this.pool.query<{ subpath: string }>(
       `SELECT DISTINCT subpath FROM ${this.table}
          WHERE project_key = $1 AND session_id = $2 AND subpath IS NOT NULL`,
-      [key.projectKey, key.sessionId],
+      [this.pk(key.projectKey), key.sessionId],
     )
-    return rows.map(r => r.subpath)
+    return rows.map((r: any) => r.subpath)
   }
 }

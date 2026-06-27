@@ -1,0 +1,200 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg-color: #0f1115;
+  --bg-secondary: #16181d;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  
+  --border-color: rgba(255, 255, 255, 0.1);
+  --accent-color: #3b82f6;
+  --accent-hover: #2563eb;
+  
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+
+  --user-msg-bg: #272a33;
+  --agent-msg-bg: transparent;
+
+  --sidebar-width: 260px;
+  --activity-panel-width: 320px;
+  
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Glassmorphism */
+.glass-panel {
+  background: rgba(22, 24, 29, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-right: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
+}
+
+.layout-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Chat Input Styling */
+.chat-input-wrapper {
+  position: relative;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+
+.chat-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 15px;
+  resize: none;
+  max-height: 200px;
+  outline: none;
+}
+
+.chat-input::placeholder {
+  color: var(--text-secondary);
+}
+
+/* Buttons */
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.icon-btn:hover {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-primary);
+}
+
+.icon-btn.primary {
+  background: var(--text-primary);
+  color: var(--bg-color);
+}
+
+.icon-btn.primary:hover {
+  background: white;
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Typing indicator */
+.dot-flashing {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+  animation: dot-flashing 1s infinite linear alternate;
+  animation-delay: 0s;
+}
+.dot-flashing::before,
+.dot-flashing::after {
+  content: '';
+  display: inline-block;
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+  animation: dot-flashing 1s infinite alternate;
+}
+.dot-flashing::before { left: -14px; animation-delay: 0s; }
+.dot-flashing::after  { left:  14px; animation-delay: 0.5s; }
+
+@keyframes dot-flashing {
+  0%   { background-color: var(--text-secondary); }
+  100% { background-color: var(--bg-secondary); }
+}
+
+.animate-spin {
+  animation: spin 1.5s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Scrollable sidebar */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Markdown Styles */
+.prose {
+  line-height: 1.6;
+}
+.prose p {
+  margin-bottom: 1em;
+}
+.prose pre {
+  background: #1e1e1e;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin-bottom: 1em;
+  border: 1px solid var(--border-color);
+}
+.prose code {
+  font-family: monospace;
+  font-size: 0.9em;
+  background: rgba(255,255,255,0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.prose pre code {
+  background: transparent;
+  padding: 0;
+}

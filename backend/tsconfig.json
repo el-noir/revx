@@ -8,6 +8,6 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts", "lib/**/*.ts", "session/**/*.ts"],
-  "exclude": ["frontend", "node_modules", "agent.ts"],
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
 }
