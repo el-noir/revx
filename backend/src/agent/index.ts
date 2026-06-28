@@ -68,6 +68,7 @@ export const sessionStore = new PostgresSessionStore({
     pool,
     fixedProjectKey: "revcon"
 })
+
 await sessionStore.ensureSchema()
 
 export const agentCwd = CWD
@@ -565,12 +566,27 @@ export async function runAgentQuery(
                 else if(message.subtype === 'task_notification'){
                     socket.emit('agent_message', { type: 'system', text: `[Task ${message.status}] Task ID: ${message.task_id.slice(-8)}` });
                 }
+                
+            }   else if(message.type === 'stream_event'){
+                    const event = (message as any).event;
 
-            } else if (message.type === 'assistant') {
-                const text = extractText(message.message.content);
-                if (text) {
-                    socket.emit('agent_message', { type: 'assistant', text });
-                }
+                    if(event?.type === 'content_block_delta' && event.delta?.type === 'text_delta'){
+                        socket.emit('agent_stream', {text: event.delta.text});
+                    }
+
+                    else if(event?.type === 'content_block_start' && event.content_block?.type ==='tool_use'){
+                        const c = event.content_block;
+                        const toolText = `\n\n [Calling Tool: ${c.name}]\n\n`;
+
+                        socket.emit('agent_stream', {text: toolText});
+                    }
+                } 
+                 
+            else if (message.type === 'assistant') {
+                // const text = extractText(message.message.content);
+                // if (text) {
+                //     socket.emit('agent_message', { type: 'assistant', text });
+                // }
             } else if (message.type === 'user' && (message as any).tool_use_result) {
                 socket.emit('agent_message', { type: 'tool', text: formatToolResponse((message as any).tool_use_result) });
             } else if (message.type === 'result') {

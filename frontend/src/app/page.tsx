@@ -29,6 +29,21 @@ export default function Home() {
     setMessages((prev) => [...prev, { id: nextMsgId.current++, role, content }]);
   };
 
+  const appendAgentStream = (text: string) => {
+    setMessages((prev)=>{
+            if (prev.length === 0) return [{ id: nextMsgId.current++, role: 'agent', content: text }];
+      const last = prev[prev.length - 1];
+      if (last.role === 'agent') {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: last.content + text }
+        ];
+      } else {
+        return [...prev, { id: nextMsgId.current++, role: 'agent', content: text }];
+      }
+    })
+  }
+
   useEffect(() => {
     const socket = io('http://localhost:4000');
     socketRef.current = socket;
@@ -77,6 +92,10 @@ export default function Home() {
       else if (payload.type === 'error') addMessage('error', payload.text ?? 'Unknown error');
     });
 
+    socket.on('agent_stream', (payload: any) =>{
+      appendAgentStream(payload.text);
+    });
+
     socket.on('ask_permission', (payload: { question: string }) => {
       setPermissionRequest(payload);
     });
@@ -87,11 +106,9 @@ export default function Home() {
   const sendMessage = () => {
     if (!input.trim() || !socketRef.current) return;
     addMessage('user', input);
-    // Only send sessionId on the FIRST message of a resumed session
-    // After that the server tracks it internally
+   
     socketRef.current.emit('chat_message', {
       prompt: input,
-      // Send session ID only when resuming (server will ignore if it already has one)
       sessionId: activeSessionId,
     });
     setInput('');
