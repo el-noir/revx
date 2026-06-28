@@ -119,17 +119,27 @@ export default function Home() {
     return () => { socket.disconnect(); };
   }, []);
 
-  const sendMessage = () => {
-    if (!input.trim() || !socketRef.current) return;
+  const sendMessage = (attachedFilePath?: string) => {
+    if ((!input.trim() && !attachedFilePath)|| !socketRef.current) return;
 
     const hasUnresolved = messages.some(m => !m.resolved && (m.role === 'permission' || m.role === 'question'));
 
     if(hasUnresolved) return ;
 
-    addMessage('user', input);
+    let finalPrompt = input.trim();
+
+    if(attachedFilePath) {
+      if(finalPrompt){
+        finalPrompt += `\n\n[Attached File: ${attachedFilePath}]`;
+      } else {
+         finalPrompt = `Please analyze this file: ${attachedFilePath}`;
+      }
+    }
+
+    addMessage('user', finalPrompt);
    
     socketRef.current.emit('chat_message', {
-      prompt: input,
+      prompt: finalPrompt,
       sessionId: activeSessionId,
     });
     setInput('');
