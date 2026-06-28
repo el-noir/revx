@@ -9,7 +9,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { ChatArea, Message } from '@/components/ChatArea';
 import { ActivityPanel } from '@/components/ActivityPanel';
 import { InputArea } from '@/components/InputArea';
-import { PermissionModal } from '@/components/PermissionModal';
+// import { PermissionModal } from '@/components/PermissionModal';
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -18,7 +18,7 @@ export default function Home() {
   const [processing, setProcessing] = useState(false);
   // activeSessionId is the source of truth — only set by server (session_init)
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
-  const [permissionRequest, setPermissionRequest] = useState<{ question: string } | null>(null);
+  // const [permissionRequest, setPermissionRequest] = useState<{ question: string } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activityOpen, setActivityOpen] = useState(true);
 
@@ -97,14 +97,35 @@ export default function Home() {
     });
 
     socket.on('ask_permission', (payload: { question: string }) => {
-      setPermissionRequest(payload);
+      // setPermissionRequest(payload);
+      setMessages((prev) => [...prev, { 
+        id: nextMsgId.current++, 
+        role: 'permission', 
+        content: payload.question,
+        resolved: false
+      } as Message]);
     });
+
+    socket.on('ask_user_question', (payload: any) => {
+      setMessages((prev) => [...prev, {
+        id: nextMsgId.current++,
+        role: 'question',
+        content: 'Agent needs clarification',
+        questionPayload: payload,
+        resolved: false
+      } as Message])
+    })
 
     return () => { socket.disconnect(); };
   }, []);
 
   const sendMessage = () => {
     if (!input.trim() || !socketRef.current) return;
+
+    const hasUnresolved = messages.some(m => !m.resolved && (m.role === 'permission' || m.role === 'question'));
+
+    if(hasUnresolved) return ;
+
     addMessage('user', input);
    
     socketRef.current.emit('chat_message', {
@@ -116,7 +137,7 @@ export default function Home() {
 
   const handleNewChat = () => {
     socketRef.current?.emit('new_chat');
-    // Optimistic clear — server will confirm with session_cleared
+    
     setActiveSessionId(undefined);
     setMessages([]);
     nextMsgId.current = 1;
@@ -124,7 +145,7 @@ export default function Home() {
 
    const handleSelectSession = (session: { sessionId: string; projectKey: string }) => {
     if (session.sessionId === activeSessionId) return;
-    // Clear current messages and load the selected session
+   
     setMessages([]);
     nextMsgId.current = 1;
     setActiveSessionId(session.sessionId);
@@ -137,10 +158,18 @@ export default function Home() {
     }
   };
 
-  const respondPermission = (allow: boolean) => {
+  const respondPermission = (msgId: number, allow: boolean) => {
     socketRef.current?.emit('permission_response', allow);
-    setPermissionRequest(null);
+    // setPermissionRequest(null);
+
+    setMessages(prev => prev.map(m => m.id === msgId ? {...m, resolved: true}: m))
   };
+
+  const respondQuestion = (msgId: number, answers: any) => {
+    socketRef.current?.emit('question_response', answers);
+
+    setMessages(prev => prev.map(m => m.id === msgId ? {...m, resolved: true}: m));
+  }
 
   return (
     <div className="layout-container">
@@ -191,12 +220,17 @@ export default function Home() {
         {/* Chat + Activity */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <ChatArea messages={messages} processing={processing} />
+                        <ChatArea 
+              messages={messages} 
+              processing={processing} 
+              onRespondPermission={respondPermission}
+              onRespondQuestion={respondQuestion}
+            />
             <InputArea
               input={input}
               setInput={setInput}
               onSend={sendMessage}
-              disabled={processing || !isConnected || !!permissionRequest}
+                disabled={processing || !isConnected || messages.some(m => !m.resolved && (m.role === 'permission' || m.role === 'question'))}
               sessionId={activeSessionId}
             />
           </div>
@@ -211,13 +245,6 @@ export default function Home() {
         </div>
       </div>
 
-      {permissionRequest && (
-        <PermissionModal
-          question={permissionRequest.question}
-          onAllow={() => respondPermission(true)}
-          onDeny={() => respondPermission(false)}
-        />
-      )}
     </div>
   );
 }

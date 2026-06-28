@@ -229,6 +229,17 @@ const handleToolRequest: CanUseTool = async (
         };
     }
 
+    if(toolName === 'AskUserQuestion'){
+        const answers = await AskUserQuestion(input);
+        return {
+            behavior: "allow",
+            updatedInput: {
+                questions: (input as any).questions,
+                answers: answers
+            }
+        };
+    }
+
 
     const approved =
         await askApproval(
@@ -295,6 +306,18 @@ function extractText(content: any): string {
     }
     return ''
 }
+
+async function AskUserQuestion(input: any): Promise<any> {
+    if(!currentSocket) return {};
+
+    return new Promise((resolve)=> {
+        currentSocket.emit('ask_user_question', input); 
+        currentSocket.once('question_response', (answers: any) =>{
+            resolve(answers);
+        })
+    })
+}
+
 
 const ghidraGuard: HookCallback = async (input) => {
 
@@ -581,7 +604,7 @@ export async function runAgentQuery(
                         socket.emit('agent_stream', {text: toolText});
                     }
                 } 
-                 
+
             else if (message.type === 'assistant') {
                 // const text = extractText(message.message.content);
                 // if (text) {
