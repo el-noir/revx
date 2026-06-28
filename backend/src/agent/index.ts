@@ -575,7 +575,10 @@ export async function runAgentQuery(
     }
 
     try {
-        for await (const message of query({prompt, options: queryOptions})) {
+        const queryParams: any = {options: queryOptions};
+        if(prompt) queryParams.prompt = prompt;
+
+            for await (const message of query(queryParams)){
             if(message.type === 'system'){
 
                 if(message.subtype === 'init'){

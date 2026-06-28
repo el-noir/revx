@@ -9,7 +9,6 @@ export const registerSocketHandlers = (io: Server, socket: Socket) => {
     socket.on('chat_message', async (data: { prompt: string, sessionId?: string }) => {
         const { prompt, sessionId } = data;
 
-       
         if (sessionId && !currentSessionId) {
             currentSessionId = sessionId;
         }
@@ -44,29 +43,30 @@ export const registerSocketHandlers = (io: Server, socket: Socket) => {
             if (entries) {
                 const historyMessages: { role: string; content: string }[] = [];
                 for (const entry of entries) {
-                    if (entry.type === 'user' && entry.message?.content) {
+                   const msg: any = entry.message;
+                   if(entry.type === 'user' && msg?.content){
                         let userText = '';
-                        if (Array.isArray(entry.message.content)) {
+                        if (Array.isArray(msg.content)) {
                             // Filter out tool_result blocks so we only show the actual user prompt
-                            userText = entry.message.content
+                            userText = msg.content
                                 .filter((c: any) => c.type === 'text')
                                 .map((c: any) => c.text)
                                 .join('\n');
-                        } else if (typeof entry.message.content === 'string') {
-                            userText = entry.message.content;
+                        } else if (typeof msg.content === 'string') {
+                            userText = msg.content;
                         }
                         if (userText.trim()) {
                             historyMessages.push({ role: 'user', content: userText });
                         }
-                    } else if (entry.type === 'assistant' && entry.message?.content) {
+                    } else if (entry.type === 'assistant' && msg?.content) {
                         let assistantText = '';
-                        if (Array.isArray(entry.message.content)) {
-                            assistantText = entry.message.content
+                        if (Array.isArray(msg.content)) {
+                            assistantText = msg.content
                                 .filter((c: any) => c.type === 'text')
                                 .map((c: any) => c.text)
                                 .join('\n');
                             
-                            const toolUses = entry.message.content.filter((c: any) => c.type === 'tool_use');
+                            const toolUses = msg.content.filter((c: any) => c.type === 'tool_use');
                             if (assistantText.trim()) {
                                 historyMessages.push({ role: 'agent', content: assistantText });
                             }
@@ -74,13 +74,13 @@ export const registerSocketHandlers = (io: Server, socket: Socket) => {
                             for (const t of toolUses) {
                                 if (t.name === 'Agent' || t.name === 'Task') {
                                     const subType = t.input?.subagent_type ?? t.input?.agent ?? 'unknown';
-                                    historyMessages.push({ role: 'tool', content: `\n🤖 [Dispatching Subagent: ${subType}]` });
+                                    historyMessages.push({ role: 'tool', content: `\n [Dispatching Subagent: ${subType}]` });
                                 } else {
-                                    historyMessages.push({ role: 'tool', content: `\n⚙️ [Calling Tool: ${t.name}]` });
+                                    historyMessages.push({ role: 'tool', content: `\n [Calling Tool: ${t.name}]` });
                                 }
                             }
-                        } else if (typeof entry.message.content === 'string') {
-                            assistantText = entry.message.content;
+                        } else if (typeof msg.content === 'string') {
+                            assistantText = msg.content;
                             if (assistantText.trim()) {
                                 historyMessages.push({ role: 'agent', content: assistantText });
                             }
